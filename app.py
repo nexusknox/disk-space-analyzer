@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import tkinter as tk
+import tkinter.font as tkfont
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -44,9 +45,8 @@ logging.basicConfig(
 
 
 def text_bar(share: float) -> str:
-    """A bar made of characters: 50% -> ██████████░░░░░░░░░░"""
-    filled = round(BAR_WIDTH * share / 100)
-    return "█" * filled + "░" * (BAR_WIDTH - filled)
+    """A bar made of characters: 50% -> ██████████"""
+    return "█" * round(BAR_WIDTH * share / 100)
 
 
 def open_in_explorer(path: Path) -> None:
@@ -70,12 +70,21 @@ class AnalyzerApp(tk.Tk):
         self.cancel_event = threading.Event()
         self.scan_output = None
 
+        self.fix_row_height()
         self.build_top_row()
         self.build_bottom_row()
         self.build_tabs()
         self.refresh_buttons(scanning=False)
 
     # ---------------------------------------------------------------- layout
+
+    def fix_row_height(self):
+        """Make table rows tall enough for the font. Without this, rows are
+        squashed on Windows when display scaling is above 100%."""
+        line = tkfont.nametofont("TkDefaultFont").metrics("linespace")
+        ttk.Style(self).configure("Treeview", rowheight=int(line * 1.5))
+        # Column widths are in pixels, so grow them as much as the font grew
+        self.scale = max(1.0, line / 16)
 
     def build_top_row(self):
         row = ttk.Frame(self, padding=(12, 12, 12, 6))
@@ -104,14 +113,14 @@ class AnalyzerApp(tk.Tk):
         # Folders: expandable tree, biggest first
         self.folder_tree = self.make_tree(
             ("size", "share", "bar", "files"),
-            (("size", "Size", 90), ("share", "% of parent", 90), ("bar", "", 170), ("files", "Files", 80)),
+            (("size", "Size", 100), ("share", "% of parent", 110), ("bar", "", 200), ("files", "Files", 80)),
             tree_label="Folder",
         )
         self.folder_tree.bind("<<TreeviewOpen>>", self.on_expand)
 
         # Largest files
         self.file_tree = self.make_tree(
-            ("size", "folder"), (("size", "Size", 90), ("folder", "Folder", 420)), tree_label="File",
+            ("size", "folder"), (("size", "Size", 100), ("folder", "Folder", 420)), tree_label="File",
         )
 
         # By type: a bar chart drawn on a canvas
@@ -125,11 +134,13 @@ class AnalyzerApp(tk.Tk):
         frame = ttk.Frame(self.tabs, padding=8)
         tree = ttk.Treeview(frame, columns=columns, show="tree headings")
         tree.heading("#0", text=tree_label)
-        tree.column("#0", width=320)
+        tree.column("#0", width=int(340 * self.scale), stretch=True)
         for column, text, width in headings:
             tree.heading(column, text=text)
-            tree.column(column, width=width, stretch=column in ("folder", "bar"),
+            tree.column(column, width=int(width * self.scale), minwidth=int(width * self.scale),
+                        stretch=column == "folder",
                         anchor="e" if column in ("size", "share", "files") else "w")
+        tree.tag_configure("loose", foreground=TEXT_SECONDARY)
         tree.bind("<Double-1>", lambda e: self.on_open())
         tree.bind("<<TreeviewSelect>>", lambda e: self.refresh_buttons(scanning=False))
         scroll = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
@@ -248,11 +259,30 @@ class AnalyzerApp(tk.Tk):
         return row_id
 
     def fill_children(self, row_id: str):
-        """Add a folder's subfolders only when it's opened (fast for huge drives)."""
+        """Add a folder's subfolders only when it's opened (fast for huge drives).
+
+        Files sitting directly in the folder get their own row, sorted in with
+        the subfolders, so the rows always add up to the folder's total.
+        """
         node = self.nodes[row_id]
         self.folder_tree.delete(*self.folder_tree.get_children(row_id))
-        for child in node.children:
-            self.add_folder_row(row_id, child, node.size)
+        rows = [(child.size, child) for child in node.children]
+        if node.own_files:
+            rows.append((node.own_size, None))  # None = "files in this folder"
+        rows.sort(key=lambda r: -r[0])
+        for size, child in rows:
+            if child is None:
+                self.add_loose_files_row(row_id, node)
+            else:
+                self.add_folder_row(row_id, child, node.size)
+
+    def add_loose_files_row(self, parent_id: str, node: FolderNode):
+        share = percent(node.own_size, node.size)
+        row_id = self.folder_tree.insert(
+            parent_id, "end", text="(files directly in this folder)", tags=("loose",),
+            values=(human_size(node.own_size), f"{share:.1f}%", text_bar(share), f"{node.own_files:,}"),
+        )
+        self.nodes[row_id] = node  # Open in Explorer opens the folder itself
 
     def on_expand(self, event):
         row_id = self.folder_tree.focus()
