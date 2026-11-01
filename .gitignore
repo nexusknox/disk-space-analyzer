@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Secrets
+.env
+
+# Build output (PyInstaller)
+build/
+dist/
+*.spec
+
+# Editor / OS
+.vscode/
+Thumbs.db
