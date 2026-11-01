@@ -152,3 +152,19 @@ def test_online_only_files_are_counted_separately(tmp_path, monkeypatch):
     assert result.root.size == 100
     assert result.cloud_only_count == 1 and result.cloud_only_size == 777
     assert "Videos" not in result.by_type
+
+
+def test_files_directly_in_a_folder_are_tracked_separately(tmp_path):
+    # Downloads-style: big loose files next to small subfolders
+    write(tmp_path / "big.iso", 5000)
+    write(tmp_path / "Sub" / "small.txt", 100)
+
+    result = scan(tmp_path)
+
+    root = result.root
+    assert root.size == 5100
+    assert root.own_size == 5000 and root.own_files == 1
+    sub = child(root, "Sub")
+    # subfolders + loose files always add up to the folder's total
+    assert sum(c.size for c in root.children) + root.own_size == root.size
+    assert sub.own_size == 100

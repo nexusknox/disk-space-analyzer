@@ -63,6 +63,8 @@ class FolderNode:
     path: Path
     size: int = 0          # bytes, including everything below it
     file_count: int = 0    # files, including everything below it
+    own_size: int = 0      # bytes of files directly in this folder (not in subfolders)
+    own_files: int = 0
     children: list["FolderNode"] = field(default_factory=list)
 
     @property
@@ -155,6 +157,8 @@ def scan(
                 size = info.st_size
                 node.size += size
                 node.file_count += 1
+                node.own_size += size
+                node.own_files += 1
 
                 total = by_type.setdefault(category_of(entry.name), TypeTotal())
                 total.size += size
